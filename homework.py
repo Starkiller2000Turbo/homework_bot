@@ -97,7 +97,7 @@ def get_api_answer(timestamp: int) -> requests.Response:
         responce = requests.get(
             ENDPOINT,
             headers=HEADERS,
-            params={'from_date': timestamp-RETRY_PERIOD},
+            params={'from_date': timestamp - RETRY_PERIOD},
         )
     except Exception:
         logging.error('Проблемы с доступоп к Эндпоинту')
