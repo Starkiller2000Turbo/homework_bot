@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import typing
+from functools import wraps
 from http import HTTPStatus
 
 import requests
@@ -33,49 +34,81 @@ HOMEWORK_VERDICTS = {
 }
 
 
-def check_tokens() -> None:
-    """Функция для проверки доступности переменных окружения.
+class ProblemsWithEndpoint(Exception):
+    """Ошибка при проблемах с эндпоинтом."""
 
-    Raises:
-        SystemExit: Если отсутствуют обязательные переменные окружения.
-    """
-    logger.info('Call function check_tokens with no arguments')
+    pass
+
+
+class EndpointDoesNotReturn200(Exception):
+    """Ошибка, если эндпоинт возвращает код отличный от 200."""
+
+    pass
+
+
+class CanNotSendMessage(Exception):
+    """Ошибка, если невозможно отправить сообщение в телеграм."""
+
+    pass
+
+
+def func_logger(func):
+    """Декоратор для логгирования вызова функций."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        ret = func(*args, **kwargs)
+        logger.info(
+            'Call func "%s" with arguments %s, %s returns %s',
+            func.__name__,
+            args,
+            kwargs,
+            ret,
+        )
+        return ret
+
+    return wrapper
+
+
+@func_logger
+def check_tokens() -> None:
+    """Функция для проверки доступности переменных окружения."""
     missing = [
         token
         for token in ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
-        if globals()[token] is None
+        if globals().get(token) is None
     ]
-    if len(missing) > 0:
+    if missing:
         logging.critical(
             'Отсутствие обязательных переменных окружения: '
-            + ", ".join(missing),
+            + ', '.join(missing),
         )
         sys.exit()
 
 
+@func_logger
 def send_message(bot: telegram.Bot, text: str) -> None:
     """Функция для отправки сообщения.
 
     Args:
         bot: Чат-бот.
-        message: Строка передаваемого текста.
+        text: Строка передаваемого текста.
+
+    Raises:
+        CanNotSendMessage: Если не получается отправить сообщение в телеграм.
     """
-    logger.info(
-        'Call function send_message with arguments: %s, %s',
-        str(bot),
-        text,
-    )
     try:
         bot.send_message(
             chat_id=TELEGRAM_CHAT_ID,
             text=text,
         )
     except telegram.TelegramError:
-        logging.error('Ошибка при отправке сообщения')
-    else:
-        logging.debug('Удачная отправка сообщения')
+        logging.exception('Ошибка при отправке сообщения')
+        raise CanNotSendMessage('Ошибка при отправке сообщения')
+    logging.debug('Удачная отправка сообщения')
 
 
+@func_logger
 def get_api_answer(timestamp: int) -> requests.Response:
     """Функция для отправки сообщения.
 
@@ -86,13 +119,9 @@ def get_api_answer(timestamp: int) -> requests.Response:
         Список домашних работ.
 
     Raises:
-        RequestException: Если есть проблемы с доступом к эндпоинту.
-        HTTPError: Если код ответа отличен от HTTPStatus.OK.
+        ProblemsWithEndpoint: Если есть проблемы с доступом к эндпоинту.
+        EndpointDoesNotReturn200: Если код ответа отличен от HTTPStatus.OK.
     """
-    logger.info(
-        'Call function get_api_answer with argument: %s',
-        str(timestamp),
-    )
     try:
         responce = requests.get(
             ENDPOINT,
@@ -100,15 +129,15 @@ def get_api_answer(timestamp: int) -> requests.Response:
             params={'from_date': timestamp - RETRY_PERIOD},
         )
     except Exception:
-        logging.error('Проблемы с доступоп к Эндпоинту')
-        raise Exception('Проблемы с доступоп к Эндпоинту')
-    else:
-        if responce.status_code == HTTPStatus.OK:
-            return responce.json()
-        logging.error('Недоступность эндпоинта')
-        raise Exception('Недоступность эндпоинта')
+        logging.exception('Проблемы с доступоп к Эндпоинту')
+        raise ProblemsWithEndpoint('Проблемы с доступоп к Эндпоинту')
+    if responce.status_code == HTTPStatus.OK:
+        return responce.json()
+    logging.error('Недоступность эндпоинта')
+    raise EndpointDoesNotReturn200('Недоступность эндпоинта')
 
 
+@func_logger
 def check_response(response: requests.Response) -> requests.Response:
     """Функция проверяет правильность полученного ответа.
 
@@ -121,10 +150,6 @@ def check_response(response: requests.Response) -> requests.Response:
     Raises:
         TypeError: Если response не соответствует ожидаемому виду.
     """
-    logger.info(
-        'Call function check_response with argument: %s',
-        str(response),
-    )
     if (
         isinstance(response, dict)
         and all(
@@ -137,6 +162,7 @@ def check_response(response: requests.Response) -> requests.Response:
     raise TypeError
 
 
+@func_logger
 def parse_status(homework: typing.Dict[str, typing.Any]) -> str:
     """Функция для возвращения информации о домашней работе.
 
@@ -147,13 +173,13 @@ def parse_status(homework: typing.Dict[str, typing.Any]) -> str:
         Строка, указывающая изменение статуса.
 
     Raises:
-        Exception: Если статус домашней работы не удаётся определить.
+        KeyError: Если статус домашней работы не удаётся определить.
     """
-    logger.info('Call function parse_status with argument: %s', str(homework))
     try:
         homework_name, status = homework['homework_name'], homework['status']
     except KeyError:
-        logging.error('Отсутствует ключ "homework_name" или "status"')
+        logging.exception('Отсутствует ключ "homework_name" или "status"')
+        raise KeyError('Домашняя работа не обладает нужными ключами')
     try:
         return (
             f'Изменился статус проверки работы "{homework_name}". '
@@ -161,14 +187,15 @@ def parse_status(homework: typing.Dict[str, typing.Any]) -> str:
         )
     except KeyError:
         logging.error(
-            f'Неожиданный статус домашней работы: {homework["status"]}',
+            'Неожиданный статус домашней работы: %s',
+            homework["status"],
         )
-        raise Exception
+        raise KeyError('Статус домашней работы не определён из ряда возможных')
 
 
+@func_logger
 def main() -> None:
     """Основная логика работы бота."""
-    logger.info('Call function main with no argument')
     check_tokens()
     logging.debug('Инициализация бота')
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
@@ -184,7 +211,7 @@ def main() -> None:
                 for homework in responce['homeworks']:
                     send_message(bot, parse_status(homework))
         except Exception:
-            logging.error('Сбой в работе программы')
+            logging.exception('Сбой в работе программы')
         finally:
             time.sleep(RETRY_PERIOD)
 
