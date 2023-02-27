@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logging.basicConfig(
+    level=logging.DEBUG,
     format='%(asctime)s - %(funcName)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger(__name__)
@@ -32,31 +33,13 @@ HOMEWORK_VERDICTS = {
 }
 
 
-def func_logger(func):
-    """Декоратор логгирует запуск функции func.
-
-    Args:
-        func: Функция, которую необходимо логгировать.
-    """
-
-    def inner(*args, **kwargs):
-        ret = func(*args, **kwargs)
-        logger.info(
-            f'Call func {func.__name__} with {args, kwargs} returns {ret}',
-        )
-        return ret
-
-    return inner
-
-
-@func_logger
 def check_tokens() -> None:
     """Функция для проверки доступности переменных окружения.
 
     Raises:
         SystemExit: Если отсутствуют обязательные переменные окружения.
     """
-    print(globals())
+    logger.info('Call function check_tokens with no arguments')
     missing = [
         token
         for token in ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
@@ -70,7 +53,6 @@ def check_tokens() -> None:
         sys.exit()
 
 
-@func_logger
 def send_message(bot: telegram.Bot, text: str) -> None:
     """Функция для отправки сообщения.
 
@@ -78,18 +60,22 @@ def send_message(bot: telegram.Bot, text: str) -> None:
         bot: Чат-бот.
         message: Строка передаваемого текста.
     """
+    logger.info(
+        'Call function send_message with arguments: %s, %s',
+        str(bot),
+        text,
+    )
     try:
         bot.send_message(
             chat_id=TELEGRAM_CHAT_ID,
             text=text,
         )
-    except telegram.TelegramError as ex:
-        logging.error('Ошибка при отправке сообщения: ', ex)
+    except telegram.TelegramError:
+        logging.error('Ошибка при отправке сообщения')
     else:
         logging.debug('Удачная отправка сообщения')
 
 
-@func_logger
 def get_api_answer(timestamp: int) -> requests.Response:
     """Функция для отправки сообщения.
 
@@ -103,23 +89,26 @@ def get_api_answer(timestamp: int) -> requests.Response:
         RequestException: Если есть проблемы с доступом к эндпоинту.
         HTTPError: Если код ответа отличен от HTTPStatus.OK.
     """
+    logger.info(
+        'Call function get_api_answer with argument: %s',
+        str(timestamp),
+    )
     try:
         responce = requests.get(
             ENDPOINT,
             headers=HEADERS,
-            params={'from_date': timestamp - RETRY_PERIOD},
+            params={'from_date': timestamp-RETRY_PERIOD},
         )
-    except requests.exceptions.RequestException as ex:
-        logging.error('Проблемы с доступоп к Эндпоинту: ', ex)
-        raise Exception('Проблемы с доступоп к Эндпоинту: ', ex)
+    except Exception:
+        logging.error('Проблемы с доступоп к Эндпоинту')
+        raise Exception('Проблемы с доступоп к Эндпоинту')
     else:
         if responce.status_code == HTTPStatus.OK:
             return responce.json()
         logging.error('Недоступность эндпоинта')
-        raise requests.exceptions.HTTPError('Недоступность эндпоинта')
+        raise Exception('Недоступность эндпоинта')
 
 
-@func_logger
 def check_response(response: requests.Response) -> requests.Response:
     """Функция проверяет правильность полученного ответа.
 
@@ -132,6 +121,10 @@ def check_response(response: requests.Response) -> requests.Response:
     Raises:
         TypeError: Если response не соответствует ожидаемому виду.
     """
+    logger.info(
+        'Call function check_response with argument: %s',
+        str(response),
+    )
     if (
         isinstance(response, dict)
         and all(
@@ -144,7 +137,6 @@ def check_response(response: requests.Response) -> requests.Response:
     raise TypeError
 
 
-@func_logger
 def parse_status(homework: typing.Dict[str, typing.Any]) -> str:
     """Функция для возвращения информации о домашней работе.
 
@@ -157,6 +149,7 @@ def parse_status(homework: typing.Dict[str, typing.Any]) -> str:
     Raises:
         Exception: Если статус домашней работы не удаётся определить.
     """
+    logger.info('Call function parse_status with argument: %s', str(homework))
     try:
         homework_name, status = homework['homework_name'], homework['status']
     except KeyError:
@@ -173,9 +166,9 @@ def parse_status(homework: typing.Dict[str, typing.Any]) -> str:
         raise Exception
 
 
-@func_logger
 def main() -> None:
     """Основная логика работы бота."""
+    logger.info('Call function main with no argument')
     check_tokens()
     logging.debug('Инициализация бота')
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
@@ -186,11 +179,12 @@ def main() -> None:
             responce = check_response(get_api_answer(timestamp))
             if responce['homeworks'] == []:
                 logging.debug('Отсутствуют новые ответы')
+                send_message(bot, text='Отсутствуют новые ответы')
             else:
                 for homework in responce['homeworks']:
                     send_message(bot, parse_status(homework))
-        except Exception as ex:
-            logging.error('Сбой в работе программы: ', ex)
+        except Exception:
+            logging.error('Сбой в работе программы')
         finally:
             time.sleep(RETRY_PERIOD)
 
