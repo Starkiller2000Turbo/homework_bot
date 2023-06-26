@@ -206,7 +206,7 @@ def main() -> None:
             responce = check_response(get_api_answer(timestamp))
             if responce['homeworks'] == []:
                 logging.debug('Отсутствуют новые ответы')
-                send_message(bot, text='Отсутствуют новые ответы')
+                # send_message(bot, text='Отсутствуют новые ответы')
             else:
                 for homework in responce['homeworks']:
                     send_message(bot, parse_status(homework))
